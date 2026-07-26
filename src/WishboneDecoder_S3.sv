@@ -70,7 +70,7 @@ always_comb begin
 end
 
 assign slave_2_CYC = master_CYC & hit_2;  // and_
-assign hit_0 = (master_CYC & (master_ADR >= 32'h8000000)) & (master_ADR < 32'h8010000);  // and__1
+assign hit_0 = (master_CYC & (master_ADR >= 32'h8000000)) & (master_ADR < 32'h8800000);  // and__1 (8MB PSRAM bank A)
 assign slave_0_CYC = master_CYC & hit_0;  // and__2
 assign slave_0_STB = master_STB & hit_0;  // and__3
 assign slave_1_STB = master_STB & hit_1;  // and__4

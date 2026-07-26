@@ -12,7 +12,7 @@ project:
     - FetchUnit.sv
     - HarborRegisterFile_E32_W32_R2_W1_B1.sv
     - HarborSpiFlashController.sv
-    - HarborSram_65536.sv
+    - HarborPsramController.sv
     - HarborUart.sv
     - RiverCore.sv
     - RiverMmu.sv
@@ -41,24 +41,24 @@ pinout:
   ui[7]: ""
 
   # Outputs
-  uo[0]: "spi_clk"
-  uo[1]: "spi_cs_n"
-  uo[2]: "uart_tx"
+  uo[0]: "uart_tx"
+  uo[1]: ""
+  uo[2]: ""
   uo[3]: ""
   uo[4]: ""
   uo[5]: ""
   uo[6]: ""
   uo[7]: ""
 
-  # Bidirectional pins
-  uio[0]: "spi_io0"
-  uio[1]: "spi_io1"
-  uio[2]: "spi_io2"
-  uio[3]: "spi_io3"
-  uio[4]: ""
-  uio[5]: ""
-  uio[6]: ""
-  uio[7]: ""
+  # Bidirectional pins (QSPI flash + PSRAM Pmod)
+  uio[0]: "CS0_flash"
+  uio[1]: "SD0"
+  uio[2]: "SD1"
+  uio[3]: "SCK"
+  uio[4]: "SD2"
+  uio[5]: "SD3"
+  uio[6]: "CS1_ram"
+  uio[7]: "CS2_ram"
 
 # Do not change!
 yaml_version: 6

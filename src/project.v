@@ -16,30 +16,44 @@ module tt_um_river_soc (
     input  wire       rst_n     // reset_n - low to reset
 );
 
-  // Bidirectional QSPI flash data lines live on uio[3:0].
-  wire [3:0] spi_io_out;
-  wire       spi_io_oe;
+  // ------------------------------------------------------------------
+  // QSPI flash + PSRAM Pmod (mole99 / Mike Bell) on the uio bus:
+  //   uio[0]=CS0(flash) uio[1]=SD0 uio[2]=SD1 uio[3]=SCK
+  //   uio[4]=SD2 uio[5]=SD3 uio[6]=CS1(RAM A) uio[7]=CS2(RAM B)
+  // ------------------------------------------------------------------
+  wire        qspi_sck;
+  wire        qspi_cs_flash;
+  wire        qspi_cs_ram;
+  wire        qspi_cs_ram2;
+  wire [3:0]  qspi_sd_out;
+  wire        qspi_sd_oe;
+  wire [3:0]  qspi_sd_in = {uio_in[5], uio_in[4], uio_in[2], uio_in[1]}; // SD3,SD2,SD1,SD0
 
   river_soc soc (
-    .clk       (clk),
-    .reset     (~rst_n),        // SoC uses active-high reset; TT rst_n is active-low
-    .uart_rx   (ui_in[0]),
-    .spi_clk   (uo_out[0]),
-    .spi_cs_n  (uo_out[1]),
-    .uart_tx   (uo_out[2]),
-    .spi_io_in (uio_in[3:0]),   // MISO / quad-read data from the pads
-    .spi_io_out(spi_io_out),    // MOSI / quad-write data to the pads
-    .spi_io_oe (spi_io_oe)      // 1 = drive spi_io, 0 = high-Z (input)
+    .clk          (clk),
+    .reset        (~rst_n),          // SoC uses active-high reset; TT rst_n is active-low
+    .uart_rx      (ui_in[0]),
+    .uart_tx      (uo_out[0]),
+    .qspi_sck     (qspi_sck),
+    .qspi_cs_flash(qspi_cs_flash),
+    .qspi_cs_ram  (qspi_cs_ram),
+    .qspi_cs_ram2 (qspi_cs_ram2),
+    .qspi_sd_in   (qspi_sd_in),
+    .qspi_sd_out  (qspi_sd_out),
+    .qspi_sd_oe   (qspi_sd_oe)
   );
 
-  // Dedicated outputs: only [2:0] are used.
-  assign uo_out[7:3] = 5'b00000;
+  // Dedicated outputs: uart_tx on uo[0], rest unused.
+  assign uo_out[7:1] = 7'b0000000;
 
-  // Bidirectional bus: spi_io on [3:0], rest unused (kept as inputs).
-  assign uio_out = {4'b0000, spi_io_out};
-  assign uio_oe  = {4'b0000, {4{spi_io_oe}}};
+  // Drive the Pmod pins.
+  assign uio_out = {qspi_cs_ram2, qspi_cs_ram, qspi_sd_out[3], qspi_sd_out[2],
+                    qspi_sck, qspi_sd_out[1], qspi_sd_out[0], qspi_cs_flash};
+  // CS/SCK are always outputs; the four data lines follow the shared oe.
+  assign uio_oe  = {1'b1, 1'b1, qspi_sd_oe, qspi_sd_oe,
+                    1'b1, qspi_sd_oe, qspi_sd_oe, 1'b1};
 
   // List all unused inputs to prevent warnings
-  wire _unused = &{ena, ui_in[7:1], uio_in[7:4], 1'b0};
+  wire _unused = &{ena, ui_in[7:1], uio_in[7], uio_in[6], uio_in[3], uio_in[0], 1'b0};
 
 endmodule
