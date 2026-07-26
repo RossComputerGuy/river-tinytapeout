@@ -4,8 +4,8 @@ project:
   title: "River TinyTapeout" # Project title
   author: "Tristan Ross" # Your name
   discord: "" # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
-  description: "A tiny River RISC-" # One line description of what your project does
-  language: "Wokwi" # other examples include SystemVerilog, Amaranth, VHDL, etc
+  description: "A tiny River RISC-V" # One line description of what your project does
+  language: "Verilog" # other examples include SystemVerilog, Amaranth, VHDL, etc
   clock_hz: 0 # Clock frequency in Hz (or 0 if not applicable)
 
   # How many tiles your design occupies? A single tile is about 167x108 uM.
@@ -15,9 +15,9 @@ project:
 # This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).
 pinout:
   # Inputs
-  ui[0]: ""
-  ui[1]: ""
-  ui[2]: ""
+  ui[0]: "clk"
+  ui[1]: "reset"
+  ui[2]: "uart_rx"
   ui[3]: ""
   ui[4]: ""
   ui[5]: ""
@@ -25,9 +25,9 @@ pinout:
   ui[7]: ""
 
   # Outputs
-  uo[0]: ""
-  uo[1]: ""
-  uo[2]: ""
+  uo[0]: "spi_clk"
+  uo[1]: "spi_cs_n"
+  uo[2]: "uart_tx"
   uo[3]: ""
   uo[4]: ""
   uo[5]: ""
@@ -35,7 +35,7 @@ pinout:
   uo[7]: ""
 
   # Bidirectional pins
-  uio[0]: ""
+  uio[0]: "spi_io"
   uio[1]: ""
   uio[2]: ""
   uio[3]: ""
