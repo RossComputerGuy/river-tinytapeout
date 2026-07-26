@@ -22,6 +22,7 @@ project:
     - WishboneDecoder_S3.sv
     - net_connect.sv
     - river_soc.sv
+    - project.v
 
   # How many tiles your design occupies? A single tile is about 167x108 uM.
   tiles: "1x1" # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2 or 8x2
@@ -30,9 +31,9 @@ project:
 # This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).
 pinout:
   # Inputs
-  ui[0]: "clk"
-  ui[1]: "reset"
-  ui[2]: "uart_rx"
+  ui[0]: "uart_rx"
+  ui[1]: ""
+  ui[2]: ""
   ui[3]: ""
   ui[4]: ""
   ui[5]: ""
