@@ -11,7 +11,7 @@ output logic qspi_cs_ram,       // CS1 -> PSRAM bank A
 output logic qspi_cs_ram2,      // CS2 -> PSRAM bank B (unused, held high)
 input  logic [3:0] qspi_sd_in,
 output logic [3:0] qspi_sd_out,
-output logic       qspi_sd_oe
+output logic [3:0] qspi_sd_oe   // per-line output enable
 );
 logic [31:0] ADR;
 logic CYC;
@@ -54,7 +54,7 @@ logic       flash_sd_oe;
 logic       psram_sck;
 logic       psram_cs_n;
 logic [3:0] psram_sd_out;
-logic       psram_sd_oe;
+logic [3:0] psram_sd_oe;
 
 HarborSpiFlashController  flash_1(.clk(clk),.reset(reset),.bus_CYC(bus_CYC),.bus_STB(bus_STB),.bus_WE(bus_WE),.bus_ADR(bus_ADR),.bus_DAT_MOSI(bus_DAT_MOSI),.bus_SEL(bus_SEL),.wr_req(),.wr_op(),.wr_addr(),.wr_len(),.wr_data(),.spi_clk(flash_sck),.spi_cs_n(flash_cs_n),.bus_ACK(slave_1_ACK),.bus_DAT_MISO(slave_1_DAT_MISO),.wr_data_index(),.wr_busy(),.wr_done(),.wr_err(),.spi_io_in(qspi_sd_in),.spi_io_out(flash_sd_out),.spi_io_oe(flash_sd_oe));
 WishboneDecoder_S3  wishbone_decoder(.master_CYC(master_CYC),.master_STB(master_STB),.master_WE(master_WE),.master_ADR(master_ADR),.master_DAT_MOSI(master_DAT_MOSI),.master_SEL(master_SEL),.slave_0_ACK(slave_0_ACK),.slave_0_DAT_MISO(slave_0_DAT_MISO),.slave_1_ACK(slave_1_ACK),.slave_1_DAT_MISO(slave_1_DAT_MISO),.slave_2_ACK(slave_2_ACK),.slave_2_DAT_MISO(slave_2_DAT_MISO),.master_ACK(dataBus_ACK),.master_DAT_MISO(dataBus_DAT_MISO),.slave_0_CYC(CYC),.slave_0_STB(STB),.slave_0_WE(WE),.slave_0_ADR(ADR),.slave_0_DAT_MOSI(DAT_MOSI),.slave_0_SEL(SEL),.slave_1_CYC(bus_CYC),.slave_1_STB(bus_STB),.slave_1_WE(bus_WE),.slave_1_ADR(bus_ADR),.slave_1_DAT_MOSI(bus_DAT_MOSI),.slave_1_SEL(bus_SEL),.slave_2_CYC(slave_2_CYC),.slave_2_STB(slave_2_STB),.slave_2_WE(slave_2_WE),.slave_2_ADR(slave_2_ADR),.slave_2_DAT_MOSI(slave_2_DAT_MOSI),.slave_2_SEL(slave_2_SEL));
@@ -68,7 +68,7 @@ wire flash_active = ~flash_cs_n;
 wire psram_active = ~psram_cs_n;
 assign qspi_sck      = flash_active ? flash_sck    : (psram_active ? psram_sck    : 1'b0);
 assign qspi_sd_out   = flash_active ? flash_sd_out : psram_sd_out;
-assign qspi_sd_oe    = flash_active ? flash_sd_oe  : (psram_active ? psram_sd_oe   : 1'b0);
+assign qspi_sd_oe    = flash_active ? {4{flash_sd_oe}} : (psram_active ? psram_sd_oe : 4'b0000);
 assign qspi_cs_flash = flash_cs_n;
 assign qspi_cs_ram   = psram_cs_n;
 assign qspi_cs_ram2  = 1'b1;      // second PSRAM bank unused

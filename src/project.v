@@ -26,7 +26,7 @@ module tt_um_river_soc (
   wire        qspi_cs_ram;
   wire        qspi_cs_ram2;
   wire [3:0]  qspi_sd_out;
-  wire        qspi_sd_oe;
+  wire [3:0]  qspi_sd_oe;
   wire [3:0]  qspi_sd_in = {uio_in[5], uio_in[4], uio_in[2], uio_in[1]}; // SD3,SD2,SD1,SD0
 
   river_soc soc (
@@ -49,9 +49,10 @@ module tt_um_river_soc (
   // Drive the Pmod pins.
   assign uio_out = {qspi_cs_ram2, qspi_cs_ram, qspi_sd_out[3], qspi_sd_out[2],
                     qspi_sck, qspi_sd_out[1], qspi_sd_out[0], qspi_cs_flash};
-  // CS/SCK are always outputs; the four data lines follow the shared oe.
-  assign uio_oe  = {1'b1, 1'b1, qspi_sd_oe, qspi_sd_oe,
-                    1'b1, qspi_sd_oe, qspi_sd_oe, 1'b1};
+  // CS/SCK are always outputs; each data line follows its own oe.
+  //          uio7   uio6   uio5(SD3)     uio4(SD2)     uio3  uio2(SD1)     uio1(SD0)     uio0
+  assign uio_oe  = {1'b1, 1'b1, qspi_sd_oe[3], qspi_sd_oe[2],
+                    1'b1, qspi_sd_oe[1], qspi_sd_oe[0], 1'b1};
 
   // List all unused inputs to prevent warnings
   wire _unused = &{ena, ui_in[7:1], uio_in[7], uio_in[6], uio_in[3], uio_in[0], 1'b0};
