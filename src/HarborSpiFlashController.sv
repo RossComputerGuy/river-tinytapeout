@@ -20,7 +20,9 @@ output logic [8:0] wr_data_index,
 output logic wr_busy,
 output logic wr_done,
 output logic wr_err,
-inout wire [3:0] spi_io
+input  wire [3:0] spi_io_in,
+output wire [3:0] spi_io_out,
+output wire       spi_io_oe
 );
 logic _bit_count_add_const_1_carry;
 logic _bit_count_add_const_1_carry_0;
@@ -84,7 +86,6 @@ logic [31:0] shift_reg;
 logic spi_clk_pin;
 logic spi_cs_n_pin;
 logic spi_drive_out;
-logic [3:0] spi_io_in;
 logic spi_mosi_bit;
 logic [2:0] spi_state;
 logic [7:0] word_idx;
@@ -110,7 +111,6 @@ assign wr_done = wr_done_reg;
 assign wr_err = wr_err_reg;
 assign bus_ACK = bus_ack_out;
 assign addr32 = bus_ADR;
-assign spi_io_in = spi_io;
 assign wr_stat_bit = _subset_1_1_spi_io;
 assign bus_dat_out = dat_out_internal;
 assign bus_DAT_MISO = bus_dat_out;
@@ -335,12 +335,13 @@ wr_stat_bit  /*   0 */
 end
 
 assign spi_mosi_bit = wr_busy ? (wr_shift[31]) : (shift_reg[31]);  // mux_0
-assign spi_io = spi_drive_out ? ({
+assign spi_io_out = {
 1'h1, /* 3 */
 1'h1, /* 2 */
 1'h0, /* 1 */
 spi_mosi_bit  /* 0 */
-}) : 4'bzzzz; // tristate
+};
+assign spi_io_oe = spi_drive_out; // active-high output enable for all 4 lines
 assign spi_drive_out = wr_busy ? wr_drive_out : (~io_dir);  // mux_1
 //  sequential_0
 always_ff @(posedge clk) begin
@@ -504,5 +505,5 @@ assign {_swizzled_add__swizzled_carry, _in0__swizzled_add__swizzled} = ({
 1'h0, /*   9 */
 wr_len  /* 8:0 */
 });
-net_connect #(.WIDTH(1)) net_connect (_subset_1_1_spi_io, (spi_io[1]));
+assign _subset_1_1_spi_io = spi_io_in[1];
 endmodule : HarborSpiFlashController
