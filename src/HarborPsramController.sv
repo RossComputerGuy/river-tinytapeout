@@ -1,197 +1,229 @@
-// QSPI PSRAM controller (APS6404 / LY68L6400 compatible).
-//
-// Wishbone slave that serves as the SoC's main RAM (slave_0), talking to an
-// external PSRAM on the Tiny Tapeout QSPI Pmod. Defaults to QUAD mode:
-//     0xEB  FAST READ QUAD : cmd(1-bit) + addr(quad) + 6 dummy + data(quad)
-//     0x38  QUAD WRITE     : cmd(1-bit) + addr(quad) + data(quad)
-// Set QUAD_MODE=0 for plain single-SPI (0x03 read / 0x02 write, no dummy).
-//
-// The command byte is always shifted out single-bit on IO0; address and data
-// use all four IO lines in quad mode. SCK runs at clk/2.
-//
-// FSM and byte/endianness handling are ported from Hirosh Dabui's KianV
-// `qqspi.v` (itself derived from Lone Dynamics' qqspi), reworked for this
-// SoC's Wishbone interface and split IO (out/oe/in) instead of inout.
-
-`default_nettype none
-
-module HarborPsramController #(
-    parameter [0:0] QUAD_MODE = 1'b1
-) (
-    input  wire        clk,
-    input  wire        reset,         // active-high synchronous reset
-    // Wishbone slave
-    input  wire        bus_CYC,
-    input  wire        bus_STB,
-    input  wire        bus_WE,
-    input  wire [31:0] bus_ADR,
-    input  wire [31:0] bus_DAT_MOSI,
-    input  wire [3:0]  bus_SEL,
-    output reg         bus_ACK,
-    output reg  [31:0] bus_DAT_MISO,
-    // SPI bus (IO0=MOSI/SD0 .. IO3=SD3)
-    output reg         spi_clk,
-    output wire        spi_cs_n,
-    output reg  [3:0]  spi_io_out,
-    output reg  [3:0]  spi_io_oe,     // per-line output enable
-    input  wire [3:0]  spi_io_in
+module HarborPsramController (
+input logic clk,
+input logic reset,
+input logic [3:0] spi_io_in,
+input logic bus_CYC,
+input logic bus_STB,
+input logic bus_WE,
+input logic [31:0] bus_ADR,
+input logic [31:0] bus_DAT_MOSI,
+input logic [3:0] bus_SEL,
+output logic spi_clk,
+output logic spi_cs_n,
+output logic [3:0] spi_io_out,
+output logic [3:0] spi_io_oe,
+output logic bus_ACK,
+output logic [31:0] bus_DAT_MISO
 );
+logic bus_ack_out;
+logic bus_ack_r;
+logic [31:0] bus_dat_out;
+logic [31:0] bus_miso_r;
+logic [1:0] byte_offset;
+logic ce;
+logic is_quad;
+logic psram_read;
+logic psram_valid;
+logic [20:0] psram_word_addr;
+logic psram_write;
+logic sclk;
+logic [3:0] sio_oe;
+logic [3:0] sio_out;
+logic [31:0] spi_buf;
+logic [2:0] state;
+logic [31:0] wr_buffer;
+logic [5:0] wr_cycles;
+logic [5:0] xfer_cycles;
+assign spi_clk = sclk;
+assign spi_cs_n = ce;
+assign spi_io_out = sio_out;
+assign spi_io_oe = sio_oe;
+assign bus_ack_out = bus_ack_r;
+assign bus_ACK = bus_ack_out;
+assign bus_dat_out = bus_miso_r;
+assign bus_DAT_MISO = bus_dat_out;
+assign psram_write = bus_WE;
+//  sequential
+always_ff @(posedge clk) begin
+  if(reset) begin
+      state <= 3'h0;
+      ce <= 1'h1;
+      sclk <= 1'h0;
+      sio_oe <= 4'h0;
+      sio_out <= 4'h0;
+      spi_buf <= 32'h0;
+      is_quad <= 1'h0;
+      xfer_cycles <= 6'h0;
+      bus_ack_r <= 1'h0;
+      bus_miso_r <= 32'h0;
+  end   else begin
+      if((xfer_cycles != 6'h0)) begin
+          sio_out <= (is_quad ? (spi_buf[31:28]) : ({
+3'h0, /* 3:1 */
+(spi_buf[31])  /*   0 */
+}));
+          if(sclk) begin
+              sclk <= 1'h0;
+          end           else begin
+              sclk <= 1'h1;
+              spi_buf <= (is_quad ? ({
+(spi_buf[27:0]), /* 31:4 */
+spi_io_in  /*  3:0 */
+}) : ({
+(spi_buf[30:0]), /* 31:1 */
+(spi_io_in[1])  /*    0 */
+}));
+              xfer_cycles <= (is_quad ? (xfer_cycles - 6'h4) : (xfer_cycles - 6'h1));
+          end 
 
-  localparam [7:0] CMD_QUAD_WRITE     = 8'h38;
-  localparam [7:0] CMD_FAST_READ_QUAD = 8'hEB;
-  localparam [7:0] CMD_WRITE          = 8'h02;
-  localparam [7:0] CMD_READ           = 8'h03;
+      end       else begin
+          case (state) 
+              3'h0 : begin
+                  sio_oe <= 4'h1;
+                  is_quad <= 1'h0;
+                  if((psram_valid & (~bus_ack_r))) begin
+                      state <= 3'h1;
+                      xfer_cycles <= 6'h0;
+                  end                   else begin
+                      if(((~psram_valid) & bus_ack_r)) begin
+                          bus_ack_r <= 1'h0;
+                          ce <= 1'h1;
+                      end                       else begin
+                          ce <= 1'h1;
+                      end 
 
-  wire        valid     = bus_CYC & bus_STB;
-  wire        write     = bus_WE;
-  wire        read      = ~write;
-  wire [20:0] word_addr = bus_ADR[22:2];   // word index into the 8 MB bank
+                  end 
 
-  // ---- write-data alignment (selected bytes -> MSB, byte offset, cycle count) ----
-  reg  [1:0]  byte_offset;
-  reg  [5:0]  wr_cycles;
-  reg  [31:0] wr_buffer;
-  always @* begin
-    wr_buffer   = bus_DAT_MOSI;
-    byte_offset = 2'd0;
-    wr_cycles   = 6'd32;
-    case (bus_SEL)
-      4'b0001: begin byte_offset = 2'd3; wr_buffer[31:24] = bus_DAT_MOSI[7:0];   wr_cycles = 6'd8;  end
-      4'b0010: begin byte_offset = 2'd2; wr_buffer[31:24] = bus_DAT_MOSI[15:8];  wr_cycles = 6'd8;  end
-      4'b0100: begin byte_offset = 2'd1; wr_buffer[31:24] = bus_DAT_MOSI[23:16]; wr_cycles = 6'd8;  end
-      4'b1000: begin byte_offset = 2'd0; wr_buffer[31:24] = bus_DAT_MOSI[31:24]; wr_cycles = 6'd8;  end
-      4'b0011: begin byte_offset = 2'd2; wr_buffer[31:16] = bus_DAT_MOSI[15:0];  wr_cycles = 6'd16; end
-      4'b1100: begin byte_offset = 2'd0; wr_buffer[31:16] = bus_DAT_MOSI[31:16]; wr_cycles = 6'd16; end
-      4'b1111: begin byte_offset = 2'd0; wr_buffer       = bus_DAT_MOSI;         wr_cycles = 6'd32; end
-      default: begin byte_offset = 2'd0; wr_buffer       = bus_DAT_MOSI;         wr_cycles = 6'd32; end
-    endcase
-  end
+              end
+              3'h1 : begin
+                  ce <= 1'h0;
+                  state <= 3'h2;
+              end
+              3'h2 : begin
+                  spi_buf <= ({
+(1'h1 ? (psram_write ? 8'h38 : 8'heb) : (psram_write ? 8'h2 : 8'h3)), /* 31:24 */
+24'h0  /* 23: 0 */
+});
+                  xfer_cycles <= 6'h8;
+                  state <= 3'h3;
+              end
+              3'h3 : begin
+                  spi_buf <= ({
+({
+1'h0, /*   23 */
+psram_word_addr, /* 22:2 */
+(psram_write ? byte_offset : 2'h0)  /*  1:0 */
+}), /* 31:8 */
+8'h0  /*  7:0 */
+});
+                  sio_oe <= 4'hf;
+                  xfer_cycles <= 6'h18;
+                  is_quad <= 1'h1;
+                  state <= ((1'h1 & psram_read) ? 3'h4 : 3'h5);
+              end
+              3'h4 : begin
+                  sio_oe <= 4'h0;
+                  xfer_cycles <= 6'h6;
+                  is_quad <= 1'h0;
+                  state <= 3'h5;
+              end
+              3'h5 : begin
+                  is_quad <= 1'h1;
+                  if(psram_write) begin
+                      sio_oe <= 4'hf;
+                      spi_buf <= wr_buffer;
+                  end                   else begin
+                      sio_oe <= 4'h0;
+                  end 
 
-  localparam [2:0] S_IDLE = 3'd0, S_SELECT = 3'd1, S_CMD = 3'd2, S_ADDR = 3'd3,
-                   S_WAIT = 3'd4, S_XFER = 3'd5, S_DONE = 3'd6;
+                  xfer_cycles <= (psram_write ? wr_cycles : 6'h20);
+                  state <= 3'h6;
+              end
+              3'h6 : begin
+                  bus_miso_r <= spi_buf;
+                  bus_ack_r <= 1'h1;
+                  state <= 3'h0;
+              end
+              default : begin
+                  state <= 3'h0;
+              end
+          endcase
 
-  reg  [2:0]  state, next_state;
-  reg  [31:0] spi_buf, spi_buf_next;
-  reg  [5:0]  xfer_cycles, xfer_cycles_next;
-  reg         is_quad, is_quad_next;
-  reg         ce, ce_next;
-  reg         sclk_next;
-  reg  [3:0]  sio_oe_next, sio_out_next;
-  reg  [31:0] rdata_next;
-  reg         ready_next;
+      end 
 
-  assign spi_cs_n = ce;   // active-low chip select (ce=1 idle, 0 selected)
+  end 
 
-  always @(posedge clk) begin
-    if (reset) begin
-      state        <= S_IDLE;
-      ce           <= 1'b1;
-      spi_clk      <= 1'b0;
-      spi_io_oe    <= 4'b0000;
-      spi_io_out   <= 4'b0000;
-      spi_buf      <= 32'b0;
-      is_quad      <= 1'b0;
-      xfer_cycles  <= 6'b0;
-      bus_ACK      <= 1'b0;
-      bus_DAT_MISO <= 32'b0;
-    end else begin
-      state        <= next_state;
-      ce           <= ce_next;
-      spi_clk      <= sclk_next;
-      spi_io_oe    <= sio_oe_next;
-      spi_io_out   <= sio_out_next;
-      spi_buf      <= spi_buf_next;
-      is_quad      <= is_quad_next;
-      xfer_cycles  <= xfer_cycles_next;
-      bus_ACK      <= ready_next;
-      bus_DAT_MISO <= rdata_next;
-    end
-  end
+end
 
-  always @* begin
-    next_state       = state;
-    ce_next          = ce;
-    sclk_next        = spi_clk;
-    sio_oe_next      = spi_io_oe;
-    sio_out_next     = spi_io_out;
-    spi_buf_next     = spi_buf;
-    is_quad_next     = is_quad;
-    xfer_cycles_next = xfer_cycles;
-    ready_next       = bus_ACK;
-    rdata_next       = bus_DAT_MISO;
-
-    if (|xfer_cycles) begin
-      // Bit engine: MSB-first, 1 bit/cycle (single) or 4 bits/cycle (quad).
-      sio_out_next = is_quad ? spi_buf[31:28] : {3'b0, spi_buf[31]};
-      if (spi_clk) begin
-        sclk_next = 1'b0;                 // falling edge
-      end else begin
-        sclk_next        = 1'b1;          // rising edge: sample + advance
-        spi_buf_next     = is_quad ? {spi_buf[27:0], spi_io_in[3:0]}
-                                   : {spi_buf[30:0], spi_io_in[1]};
-        xfer_cycles_next = is_quad ? xfer_cycles - 6'd4 : xfer_cycles - 6'd1;
+assign psram_valid = bus_CYC & bus_STB;  // and__1
+assign psram_read = ~psram_write;  // not__1
+assign psram_word_addr = bus_ADR[22:2];  // bussubset_4
+//  combinational
+always_comb begin
+  byte_offset = 2'h0;
+  wr_cycles = 6'h20;
+  wr_buffer = bus_DAT_MOSI;
+  case (bus_SEL) 
+      4'h1 : begin
+          byte_offset = 2'h3;
+          wr_buffer = ({
+(bus_DAT_MOSI[7:0]), /* 31:24 */
+24'h0  /* 23: 0 */
+});
+          wr_cycles = 6'h8;
       end
-    end else begin
-      case (state)
-        S_IDLE: begin
-          sio_oe_next  = 4'b0001;         // only IO0 driven for the command
-          is_quad_next = 1'b0;
-          if (valid && !bus_ACK) begin
-            next_state       = S_SELECT;
-            xfer_cycles_next = 6'd0;
-          end else if (!valid && bus_ACK) begin
-            ready_next = 1'b0;
-            ce_next    = 1'b1;
-          end else begin
-            ce_next = 1'b1;
-          end
-        end
-        S_SELECT: begin
-          ce_next    = 1'b0;              // assert CS
-          next_state = S_CMD;
-        end
-        S_CMD: begin
-          if (QUAD_MODE)
-            spi_buf_next[31:24] = write ? CMD_QUAD_WRITE : CMD_FAST_READ_QUAD;
-          else
-            spi_buf_next[31:24] = write ? CMD_WRITE : CMD_READ;
-          xfer_cycles_next = 6'd8;        // command: 8 single-bit cycles
-          next_state       = S_ADDR;
-        end
-        S_ADDR: begin
-          spi_buf_next[31:8] = {1'b0, word_addr, write ? byte_offset : 2'b00};
-          sio_oe_next        = QUAD_MODE ? 4'b1111 : 4'b0001;
-          xfer_cycles_next   = 6'd24;     // 24-bit address
-          is_quad_next       = QUAD_MODE;
-          next_state         = (QUAD_MODE && read) ? S_WAIT : S_XFER;
-        end
-        S_WAIT: begin
-          sio_oe_next      = 4'b0000;     // dummy cycles for quad fast read
-          xfer_cycles_next = 6'd6;
-          is_quad_next     = 1'b0;
-          next_state       = S_XFER;
-        end
-        S_XFER: begin
-          is_quad_next = QUAD_MODE;
-          if (write) begin
-            sio_oe_next  = QUAD_MODE ? 4'b1111 : 4'b0001;
-            spi_buf_next = wr_buffer;
-          end else begin
-            sio_oe_next  = QUAD_MODE ? 4'b0000 : 4'b0001;
-          end
-          xfer_cycles_next = write ? wr_cycles : 6'd32;
-          next_state       = S_DONE;
-        end
-        S_DONE: begin
-          rdata_next = spi_buf;           // read data (self-consistent byte order)
-          ready_next = 1'b1;
-          next_state = S_IDLE;
-        end
-        default: next_state = S_IDLE;
-      endcase
-    end
-  end
+      4'h2 : begin
+          byte_offset = 2'h2;
+          wr_buffer = ({
+(bus_DAT_MOSI[15:8]), /* 31:24 */
+24'h0  /* 23: 0 */
+});
+          wr_cycles = 6'h8;
+      end
+      4'h4 : begin
+          byte_offset = 2'h1;
+          wr_buffer = ({
+(bus_DAT_MOSI[23:16]), /* 31:24 */
+24'h0  /* 23: 0 */
+});
+          wr_cycles = 6'h8;
+      end
+      4'h8 : begin
+          byte_offset = 2'h0;
+          wr_buffer = ({
+(bus_DAT_MOSI[31:24]), /* 31:24 */
+24'h0  /* 23: 0 */
+});
+          wr_cycles = 6'h8;
+      end
+      4'h3 : begin
+          byte_offset = 2'h2;
+          wr_buffer = ({
+(bus_DAT_MOSI[15:0]), /* 31:16 */
+16'h0  /* 15: 0 */
+});
+          wr_cycles = 6'h10;
+      end
+      4'hc : begin
+          byte_offset = 2'h0;
+          wr_buffer = ({
+(bus_DAT_MOSI[31:16]), /* 31:16 */
+16'h0  /* 15: 0 */
+});
+          wr_cycles = 6'h10;
+      end
+      4'hf : begin
+          byte_offset = 2'h0;
+          wr_buffer = bus_DAT_MOSI;
+          wr_cycles = 6'h20;
+      end
+      default : begin
+          byte_offset = 2'h0;
+          wr_buffer = bus_DAT_MOSI;
+          wr_cycles = 6'h20;
+      end
+  endcase
 
-endmodule
+end
 
-`default_nettype wire
+endmodule : HarborPsramController

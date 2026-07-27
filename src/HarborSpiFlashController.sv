@@ -1,6 +1,7 @@
 module HarborSpiFlashController (
 input logic clk,
 input logic reset,
+input logic [3:0] spi_io_in,
 input logic bus_CYC,
 input logic bus_STB,
 input logic bus_WE,
@@ -14,15 +15,14 @@ input logic [8:0] wr_len,
 input logic [7:0] wr_data,
 output logic spi_clk,
 output logic spi_cs_n,
+output logic [3:0] spi_io_out,
+output logic [3:0] spi_io_oe,
 output logic bus_ACK,
 output logic [31:0] bus_DAT_MISO,
 output logic [8:0] wr_data_index,
 output logic wr_busy,
 output logic wr_done,
-output logic wr_err,
-input  wire [3:0] spi_io_in,
-output wire [3:0] spi_io_out,
-output wire       spi_io_oe
+output logic wr_err
 );
 logic _bit_count_add_const_1_carry;
 logic _bit_count_add_const_1_carry_0;
@@ -49,13 +49,12 @@ logic [31:0] _shiftAmount_const_1_1;
 logic [31:0] _shiftAmount_const_1_2;
 logic [31:0] _shiftAmount_const_1_3;
 logic [31:0] _shiftAmount_const_1_4;
-logic [7:0] _shiftAmount_const_1_5;
-logic [31:0] _shiftAmount_const_1_6;
+logic [31:0] _shiftAmount_const_1_5;
+logic [7:0] _shiftAmount_const_1_6;
 logic [31:0] _shiftAmount_const_24;
 logic [31:0] _shiftAmount_const_4;
 logic [31:0] _shiftAmount_const_8;
 logic [31:0] _shiftAmount_const_8_0;
-wire _subset_1_1_spi_io;
 logic _swizzled_add__swizzled_carry;
 logic _word_idx_add_const_1_carry;
 logic _wr_bit_count_add_const_1_carry;
@@ -86,6 +85,7 @@ logic [31:0] shift_reg;
 logic spi_clk_pin;
 logic spi_cs_n_pin;
 logic spi_drive_out;
+logic [3:0] spi_io_in_0;
 logic spi_mosi_bit;
 logic [2:0] spi_state;
 logic [7:0] word_idx;
@@ -110,21 +110,21 @@ assign wr_data_index = wr_byte_idx;
 assign wr_done = wr_done_reg;
 assign wr_err = wr_err_reg;
 assign bus_ACK = bus_ack_out;
-assign addr32 = bus_ADR;
-assign wr_stat_bit = _subset_1_1_spi_io;
 assign bus_dat_out = dat_out_internal;
 assign bus_DAT_MISO = bus_dat_out;
+assign addr32 = bus_ADR;
+assign spi_io_in_0 = spi_io_in;
 assign _shiftAmount_const_1 = 32'h1;
 assign _shiftAmount_const_1_0 = 32'h1;
 assign _shiftAmount_const_1_1 = 32'h1;
 assign _shiftAmount_const_1_2 = 32'h1;
 assign _shiftAmount_const_1_3 = 32'h1;
+assign _shiftAmount_const_4 = 32'h4;
 assign _shiftAmount_const_8 = 32'h8;
 assign _shiftAmount_const_1_4 = 32'h1;
-assign _shiftAmount_const_4 = 32'h4;
-assign _shiftAmount_const_1_5 = 8'h1;
-assign _shiftAmount_const_1_6 = 32'h1;
+assign _shiftAmount_const_1_5 = 32'h1;
 assign _shiftAmount_const_8_0 = 32'h8;
+assign _shiftAmount_const_1_6 = 8'h1;
 assign _shiftAmount_const_24 = 32'h18;
 assign spi_clk_pin = wr_busy ? wr_spi_clk : rd_spi_clk;  // mux
 assign wr_busy = ~(wr_state == 4'h0);  // not_
@@ -293,7 +293,7 @@ wr_data  /*  7:0 */
           4'hb : begin
               wr_spi_clk <= (~wr_spi_clk);
               if(wr_spi_clk) begin
-                  wr_status <= ((wr_status << _shiftAmount_const_1_5) | ({
+                  wr_status <= ((wr_status << _shiftAmount_const_1_6) | ({
 7'h0, /* 7:1 */
 wr_stat_bit  /*   0 */
 }));
@@ -340,9 +340,11 @@ assign spi_io_out = {
 1'h1, /* 2 */
 1'h0, /* 1 */
 spi_mosi_bit  /* 0 */
-};
-assign spi_io_oe = spi_drive_out; // active-high output enable for all 4 lines
-assign spi_drive_out = wr_busy ? wr_drive_out : (~io_dir);  // mux_1
+};  // swizzle
+assign next_shift = (shift_reg << _shiftAmount_const_4) | ({
+28'h0, /* 31:4 */
+spi_io_in_0  /*  3:0 */
+});  // or_
 //  sequential_0
 always_ff @(posedge clk) begin
   if(reset) begin
@@ -403,7 +405,7 @@ always_ff @(posedge clk) begin
               3'h2 : begin
                   rd_spi_clk <= (~rd_spi_clk);
                   if(rd_spi_clk) begin
-                      shift_reg <= (shift_reg << _shiftAmount_const_1_6);
+                      shift_reg <= (shift_reg << _shiftAmount_const_1_5);
                       bit_count <= _in44__bit_count_add_const_1;
                       if((bit_count == 8'h17)) begin
                           bit_count <= 8'h0;
@@ -476,19 +478,17 @@ always_ff @(posedge clk) begin
 
 end
 
-assign rd_stb_gated = (bus_CYC & bus_STB) & (~wr_busy);  // and__1
-assign line_hit = line_valid & (req_line_base == line_tag);  // and__3
-assign req_line_base = addr32 & 32'h9ffffc;  // and__4
-assign next_shift = (shift_reg << _shiftAmount_const_4) | ({
-28'h0, /* 31:4 */
-spi_io_in  /*  3:0 */
-});  // or_
+assign spi_cs_n_pin = wr_busy ? wr_spi_cs_n : rd_spi_cs_n;  // mux_1
 assign {_bit_count_add_const_1_carry, _in36__bit_count_add_const_1} = bit_count + 8'h1;
 assign {_bit_count_add_const_1_carry_0, _in44__bit_count_add_const_1} = bit_count + 8'h1;
 assign {_bit_count_add_const_1_carry_1, _in52__bit_count_add_const_1} = bit_count + 8'h1;
 assign {_bit_count_add_const_1_carry_2, _in60__bit_count_add_const_1} = bit_count + 8'h1;
+assign spi_drive_out = wr_busy ? wr_drive_out : (~io_dir);  // mux_2
+assign spi_io_oe = {4{spi_drive_out}};  // unnamed_module
+assign rd_stb_gated = (bus_CYC & bus_STB) & (~wr_busy);  // and__1
+assign line_hit = line_valid & (req_line_base == line_tag);  // and__3
+assign req_line_base = addr32 & 32'h9ffffc;  // and__4
 assign {_word_idx_add_const_1_carry, _in68__word_idx_add_const_1} = word_idx + 8'h1;
-assign spi_cs_n_pin = wr_busy ? wr_spi_cs_n : rd_spi_cs_n;  // mux_2
 assign {_wr_bit_count_add_const_1_carry, _in42__wr_bit_count_add_const_1} = wr_bit_count + 8'h1;
 assign {_wr_bit_count_add_const_1_carry_0, _in55__wr_bit_count_add_const_1} = wr_bit_count + 8'h1;
 assign {_wr_bit_count_add_const_1_carry_1, _in63__wr_bit_count_add_const_1} = wr_bit_count + 8'h1;
@@ -497,6 +497,7 @@ assign {_wr_bit_count_add_const_1_carry_3, _in103__wr_bit_count_add_const_1} = w
 assign {_wr_bit_count_add_const_1_carry_4, _in111__wr_bit_count_add_const_1} = wr_bit_count + 8'h1;
 assign {_wr_byte_idx_add_const_1_carry, _in79__wr_byte_idx_add_const_1} = wr_byte_idx + 9'h1;
 assign {_wr_byte_idx_add_const_1_carry_0, _in0__wr_byte_idx_add_const_1} = wr_byte_idx + 9'h1;
+assign wr_stat_bit = spi_io_in[1];  // bussubset_5
 assign {_wr_poll_count_add_const_1_carry, _in98__wr_poll_count_add_const_1} = wr_poll_count + 21'h1;
 assign {_swizzled_add__swizzled_carry, _in0__swizzled_add__swizzled} = ({
 2'h0, /* 9:8 */
@@ -505,5 +506,4 @@ assign {_swizzled_add__swizzled_carry, _in0__swizzled_add__swizzled} = ({
 1'h0, /*   9 */
 wr_len  /* 8:0 */
 });
-assign _subset_1_1_spi_io = spi_io_in[1];
 endmodule : HarborSpiFlashController

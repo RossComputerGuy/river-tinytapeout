@@ -9,18 +9,20 @@ project:
   clock_hz: 0 # Clock frequency in Hz (or 0 if not applicable)
   top_module: tt_um_river_soc
   source_files:
+    - DynamicExecutionUnit.sv
+    - DynamicInstructionDecoder.sv
     - FetchUnit.sv
+    - HarborPsramController.sv
     - HarborRegisterFile_E32_W32_R2_W1_B1.sv
     - HarborSpiFlashController.sv
-    - HarborPsramController.sv
     - HarborUart.sv
+    - MicrocodeAlu.sv
     - RiverCore.sv
+    - RiverMicrocodeLookup.sv
+    - RiverMicrocodeOperations.sv
     - RiverMmu.sv
     - RiverPipeline.sv
-    - StaticExecutionUnit.sv
-    - StaticInstructionDecoder.sv
     - WishboneDecoder_S3.sv
-    - net_connect.sv
     - river_soc.sv
     - project.v
 
